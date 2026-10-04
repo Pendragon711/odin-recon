@@ -1,0 +1,59 @@
+# Configuração do Odin Recon
+# Nenhum campo de API key existe de propósito — o Odin não depende de serviços pagos.
+
+profile: standard # quick | standard | deep
+
+scope:
+  # Domínios/hosts dentro do escopo autorizado. Suporta wildcard "*.exemplo.com".
+  include:
+    - "*.exemplo.com"
+  # Qualquer coisa aqui é sempre ignorada, mesmo se bater no include.
+  exclude: []
+
+dns:
+  resolvers:
+    - "1.1.1.1"
+    - "1.0.0.1"
+    - "8.8.8.8"
+    - "8.8.4.4"
+  wildcard_check: true
+  record_types: ["A", "AAAA", "CNAME", "NS", "MX", "TXT"]
+  try_axfr: true
+  timeout_seconds: 5
+  concurrency: 50
+
+discovery:
+  use_subfinder: true
+  bruteforce: true
+  wordlist: "" # vazio = usa a lista embutida pequena
+  permutations: true
+
+ports:
+  profiles:
+    quick: "80,443"
+    standard: "80,443,8000,8080,8443,8888,9000,9090,9443"
+    deep: "top-1000"
+  rate: 1000
+  timeout_ms: 1000
+
+http:
+  threads: 25
+  timeout_seconds: 10
+  follow_redirects: true
+  screenshot: false
+
+crawler:
+  enabled: true
+  max_depth: 2
+  concurrency: 10
+  parallelism: 10
+  rate_limit: 150
+  headless: false
+  scope_strict: true # não sai do(s) domínio(s) do alvo
+
+rate_limit:
+  global_rps: 50
+
+output:
+  save_json: true
+  json_path: "db/output"
