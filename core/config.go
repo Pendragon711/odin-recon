@@ -13,12 +13,12 @@ type ScopeConfig struct {
 }
 
 type DNSConfig struct {
-	Resolvers       []string `yaml:"resolvers"`
-	WildcardCheck   bool     `yaml:"wildcard_check"`
-	RecordTypes     []string `yaml:"record_types"`
-	TryAXFR         bool     `yaml:"try_axfr"`
-	TimeoutSeconds  int      `yaml:"timeout_seconds"`
-	Concurrency     int      `yaml:"concurrency"`
+	Resolvers      []string `yaml:"resolvers"`
+	WildcardCheck  bool     `yaml:"wildcard_check"`
+	RecordTypes    []string `yaml:"record_types"`
+	TryAXFR        bool     `yaml:"try_axfr"`
+	TimeoutSeconds int      `yaml:"timeout_seconds"`
+	Concurrency    int      `yaml:"concurrency"`
 }
 
 type DiscoveryConfig struct {
@@ -35,10 +35,11 @@ type PortsConfig struct {
 }
 
 type HTTPConfig struct {
-	Threads         int  `yaml:"threads"`
-	TimeoutSeconds  int  `yaml:"timeout_seconds"`
-	FollowRedirects bool `yaml:"follow_redirects"`
-	Screenshot      bool `yaml:"screenshot"`
+	Threads         int    `yaml:"threads"`
+	TimeoutSeconds  int    `yaml:"timeout_seconds"`
+	FollowRedirects bool   `yaml:"follow_redirects"`
+	Screenshot      bool   `yaml:"screenshot"`
+	UserAgent       string `yaml:"user_agent"` // vazio = UA de navegador comum (o default do httpx se anuncia como scanner e convida WAF)
 }
 
 type CrawlerConfig struct {

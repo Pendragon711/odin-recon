@@ -112,12 +112,17 @@ func RunPipeline(domain string, cfg *Config) error {
 		utils.LogWarning(fmt.Sprintf("Falha ao salvar portas: %v", err))
 	}
 
-	// 4. HTTP probing (testa http e https, não adivinha pela porta)
+	// 4. HTTP probing (testa http e https, não adivinha pela porta).
+	//    -fd (filter-duplicates) do httpx fica DESLIGADO: ele usa o mesmo
+	//    simhash de corpo e descartaria silenciosamente clones legítimos
+	//    antes da nossa contagem de hosts — a detecção de WAF precisa ver
+	//    todas as respostas para contar repetições por host.
 	httpResults, err := modules.RunHTTPProbing(portResults, modules.HTTPOptions{
 		Threads:         cfg.HTTP.Threads,
 		TimeoutSeconds:  cfg.HTTP.TimeoutSeconds,
 		FollowRedirects: cfg.HTTP.FollowRedirects,
 		GlobalRPS:       cfg.RateLimit.GlobalRPS,
+		UserAgent:       cfg.HTTP.UserAgent,
 	})
 	if err != nil {
 		utils.LogWarning(fmt.Sprintf("Falha no módulo HTTP, continuando sem ele: %v", err))
