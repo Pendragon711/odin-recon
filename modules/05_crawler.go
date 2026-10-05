@@ -37,10 +37,26 @@ func RunCrawler(httpResults []HTTPResult, opts CrawlerOptions) ([]EndpointResult
 	utils.LogInfo(fmt.Sprintf("Iniciando crawling ativo (Katana) em %d aplicações web...", len(httpResults)))
 
 	var urls []string
+	seen := make(map[string]bool)
+	skipped := 0
 	for _, res := range httpResults {
-		if res.URL != "" {
-			urls = append(urls, res.URL)
+		if res.URL == "" {
+			continue
 		}
+		// Não desperdiça tempo de crawl (nem chama atenção do WAF) em
+		// páginas de bloqueio: o body delas não tem link real para seguir.
+		if res.BlockPage {
+			skipped++
+			continue
+		}
+		if seen[res.URL] {
+			continue
+		}
+		seen[res.URL] = true
+		urls = append(urls, res.URL)
+	}
+	if skipped > 0 {
+		utils.LogInfo(fmt.Sprintf("%d URLs puladas no crawling por serem provável página de bloqueio WAF.", skipped))
 	}
 
 	if len(urls) == 0 {

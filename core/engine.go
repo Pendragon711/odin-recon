@@ -129,7 +129,7 @@ func RunPipeline(domain string, cfg *Config) error {
 		httpRows = append(httpRows, HTTPServiceRow{
 			Host: r.Subdomain, IP: r.IP, Port: r.Port, Protocol: r.Protocol,
 			StatusCode: r.StatusCode, Title: r.Title, Tech: r.Tech, URL: r.URL,
-			ContentLength: r.ContentLength, BodyHash: r.BodyHash, FaviconHash: r.FaviconHash,
+			ContentLength: r.ContentLength, BodyHash: r.BodyHash, SimHash: r.SimHash, FaviconHash: r.FaviconHash,
 			Server: r.Server, CDN: r.CDNName, IsBlockPage: r.BlockPage, TLSSans: r.TLSSansJSON,
 		})
 		tlsFeedbackHosts = append(tlsFeedbackHosts, r.TLSSans...)

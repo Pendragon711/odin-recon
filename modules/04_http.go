@@ -3,6 +3,7 @@ package modules
 import (
 	"encoding/json"
 	"fmt"
+	"math/bits"
 	"os"
 	"strconv"
 
@@ -22,10 +23,12 @@ type HTTPResult struct {
 	URL           string
 	ContentLength int
 	BodyHash      string
+	SimHash       uint64   // simhash do corpo — resiste a mudanças dinâmicas (nonce/csrf/timestamp) que quebram o hash exato
 	FaviconHash   string
 	Server        string
 	CDNName       string   // nome do CDN/WAF reportado pelo httpx (ex.: cloudflare)
-	BlockPage     bool     // marcado post-scan: body_hash repetido em muitos hosts
+	BlockPage     bool     // marcado post-scan: body_hash/simhash repetido em muitos hosts
+	BlockReason   string   // "exact" = mesmo body_hash; "similar" = bodies quase idênticos (simhash)
 	TLSSans       []string // hosts extraídos do certificado, para retroalimentação
 	TLSSansJSON   string   // mesmo conteúdo serializado, para gravar no banco
 }
@@ -90,7 +93,7 @@ func RunHTTPProbing(portResults []PortResult, opts HTTPOptions) ([]HTTPResult, e
 		TechDetect:           true,
 		ExtractTitle:         true,
 		OutputServerHeader:   true,
-		Hashes:               "mmh3", // body_mmh3/header_mmh3 no Result.Hashes; favicon via flag Favicon
+		Hashes:              "mmh3,simhash", // body_mmh3 (idêntico) + body_simhash (quase-idêntico, resiste a nonce/CSRF/timestamp no HTML)
 		Favicon:              true,   // popula FavIconMMH3 (hash clássico tipo Shodan/search engines)
 		FollowRedirects:      opts.FollowRedirects,
 		Threads:              threads,
@@ -117,10 +120,17 @@ func RunHTTPProbing(portResults []PortResult, opts HTTPOptions) ([]HTTPResult, e
 			sansJSON, _ := json.Marshal(sans)
 
 			bodyHash := ""
+			var simHash uint64
 			faviconHash := r.FavIconMMH3
 			if r.Hashes != nil {
 				if v, ok := r.Hashes["body_mmh3"]; ok {
 					bodyHash = fmt.Sprintf("%v", v)
+				}
+				// httpx serializa o simhash como número decimal em string.
+				if v, ok := r.Hashes["body_simhash"]; ok {
+					if sh, err := strconv.ParseUint(fmt.Sprintf("%v", v), 10, 64); err == nil {
+						simHash = sh
+					}
 				}
 			}
 
@@ -142,6 +152,7 @@ func RunHTTPProbing(portResults []PortResult, opts HTTPOptions) ([]HTTPResult, e
 				URL:           r.URL,
 				ContentLength: r.ContentLength,
 				BodyHash:      bodyHash,
+				SimHash:       simHash,
 				FaviconHash:   faviconHash,
 				Server:        r.WebServer,
 				CDNName:       r.CDNName,
@@ -190,6 +201,12 @@ func effectiveRPS(cfgRPS int) int {
 // mesmo body_hash consideramos "página de bloqueio" e não aplicação real.
 const blockPageMinHosts = 5
 
+// simhashHammingThreshold: distância máxima de bits entre dois simhashes
+// para considerarmos os corpos "quase idênticos". Em 64 bits, <=3 é
+// conservador (falsos positivos raros); páginas de bloqueio com nonce/CSRF
+// dinâmico mudam poucos tokens do corpo e caem nessa faixa.
+const simhashHammingThreshold = 3
+
 func markBlockPages(results []HTTPResult) {
 	hostByHash := make(map[string]map[string]bool)
 	for _, r := range results {
@@ -207,6 +224,85 @@ func markBlockPages(results []HTTPResult) {
 		}
 		if len(hostByHash[results[i].BodyHash]) >= blockPageMinHosts {
 			results[i].BlockPage = true
+			results[i].BlockReason = "exact"
+		}
+	}
+
+	// Camada 2 — similaridade (simhash): pega a página de bloqueio quando
+	// ela embute um token dinâmico (nonce, CSRF, timestamp) que muda o
+	// body_hash exato a cada resposta. Agrupa por proximidade de Hamming
+	// via "pigeonhole": se dois simhashes diferem em <=T bits, eles
+	// obrigatoriamente coincidem em pelo menos um dos T+1 blocos de
+	// 64/(T+1) bits — então basta comparar candidatos que compartilham
+	// algum bloco, sem fazer O(n²).
+	type shEntry struct {
+		idx  int
+		hash uint64
+	}
+	buckets := make(map[[2]interface{}][]shEntry) // {bloco i, valor} -> entradas
+	for i, r := range results {
+		if r.SimHash == 0 {
+			continue
+		}
+		nblocks := simhashHammingThreshold + 1
+		blockBits := 64 / nblocks
+		for b := 0; b < nblocks; b++ {
+			key := [2]interface{}{b, (r.SimHash >> (uint(b) * uint(blockBits))) & ((uint64(1) << blockBits) - 1)}
+			buckets[key] = append(buckets[key], shEntry{idx: i, hash: r.SimHash})
+		}
+	}
+
+	// Union-find simples sobre índices para formar clusters de bodies similares.
+	parent := make(map[int]int)
+	find := func(x int) int {
+		for parent[x] != x {
+			parent[x] = parent[parent[x]]
+			x = parent[x]
+		}
+		return x
+	}
+	union := func(a, b int) {
+		ra, rb := find(a), find(b)
+		if ra != rb {
+			parent[rb] = ra
+		}
+	}
+	for i := range results {
+		if results[i].SimHash != 0 {
+			parent[i] = i
+		}
+	}
+	for _, entries := range buckets {
+		for _, e := range entries {
+			for _, f := range entries {
+				if e.idx >= f.idx {
+					continue
+				}
+				if bits.OnesCount64(e.hash ^ f.hash) <= simhashHammingThreshold {
+					union(e.idx, f.idx)
+				}
+			}
+		}
+	}
+
+	hostsByCluster := make(map[int]map[string]bool)
+	for i, r := range results {
+		if r.SimHash == 0 {
+			continue
+		}
+		root := find(i)
+		if hostsByCluster[root] == nil {
+			hostsByCluster[root] = make(map[string]bool)
+		}
+		hostsByCluster[root][r.Subdomain] = true
+	}
+	for i := range results {
+		if results[i].BlockPage || results[i].SimHash == 0 {
+			continue
+		}
+		if len(hostsByCluster[find(i)]) >= blockPageMinHosts {
+			results[i].BlockPage = true
+			results[i].BlockReason = "similar"
 		}
 	}
 }
