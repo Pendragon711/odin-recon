@@ -102,6 +102,8 @@ func createTables() error {
 		body_hash TEXT,
 		favicon_hash TEXT,
 		server TEXT,
+		cdn TEXT,                 -- CDN/WAF detectado pelo httpx (ex.: cloudflare)
+		is_blockpage BOOLEAN DEFAULT 0, -- 1 = body_hash repetido em muitos hosts (ruído de WAF)
 		tls_sans TEXT,            -- JSON array de SANs do certificado
 		first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
 		last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -129,6 +131,18 @@ func createTables() error {
 	_, err := DB.Exec(schema)
 	if err != nil {
 		return fmt.Errorf("erro ao criar tabelas: %w", err)
+	}
+
+	// Migração leve para bancos criados em versões anteriores: SQLite não
+	// aceita ADD COLUMN dentro de CREATE TABLE IF NOT EXISTS, então as
+	// colunas novas são adicionadas aqui e erros de "duplicate column"
+	// são silenciosamente ignorados (a coluna já existe).
+	addColumns := []string{
+		`ALTER TABLE http_services ADD COLUMN cdn TEXT`,
+		`ALTER TABLE http_services ADD COLUMN is_blockpage BOOLEAN DEFAULT 0`,
+	}
+	for _, stmt := range addColumns {
+		DB.Exec(stmt) // best-effort; schema acima já cobre bancos novos
 	}
 
 	utils.LogSuccess("Banco de dados SQLite inicializado e tabelas estruturadas.")
@@ -267,6 +281,8 @@ type HTTPServiceRow struct {
 	BodyHash      string
 	FaviconHash   string
 	Server        string
+	CDN           string
+	IsBlockPage   bool
 	TLSSans       string
 }
 
@@ -281,8 +297,8 @@ func SaveHTTPServices(scanID int64, rows []HTTPServiceRow) error {
 	stmt, err := tx.Prepare(`
 		INSERT INTO http_services
 			(scan_id, host, ip, port, protocol, status_code, title, tech, url,
-			 content_length, body_hash, favicon_hash, server, tls_sans)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 content_length, body_hash, favicon_hash, server, cdn, is_blockpage, tls_sans)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(scan_id, url) DO UPDATE SET
 			status_code = excluded.status_code,
 			title = excluded.title,
@@ -291,6 +307,8 @@ func SaveHTTPServices(scanID int64, rows []HTTPServiceRow) error {
 			body_hash = excluded.body_hash,
 			favicon_hash = excluded.favicon_hash,
 			server = excluded.server,
+			cdn = excluded.cdn,
+			is_blockpage = excluded.is_blockpage,
 			tls_sans = excluded.tls_sans,
 			last_seen = CURRENT_TIMESTAMP;
 	`)
@@ -303,7 +321,7 @@ func SaveHTTPServices(scanID int64, rows []HTTPServiceRow) error {
 	for _, r := range rows {
 		_, err := stmt.Exec(
 			scanID, r.Host, r.IP, r.Port, r.Protocol, r.StatusCode, r.Title, r.Tech, r.URL,
-			r.ContentLength, r.BodyHash, r.FaviconHash, r.Server, r.TLSSans,
+			r.ContentLength, r.BodyHash, r.FaviconHash, r.Server, r.CDN, r.IsBlockPage, r.TLSSans,
 		)
 		if err != nil {
 			utils.LogWarning(fmt.Sprintf("Falha ao salvar serviço HTTP %s: %v", r.URL, err))

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 
 	"odin/utils"
 
@@ -23,6 +24,8 @@ type HTTPResult struct {
 	BodyHash      string
 	FaviconHash   string
 	Server        string
+	CDNName       string   // nome do CDN/WAF reportado pelo httpx (ex.: cloudflare)
+	BlockPage     bool     // marcado post-scan: body_hash repetido em muitos hosts
 	TLSSans       []string // hosts extraídos do certificado, para retroalimentação
 	TLSSansJSON   string   // mesmo conteúdo serializado, para gravar no banco
 }
@@ -31,11 +34,18 @@ type HTTPOptions struct {
 	Threads         int
 	TimeoutSeconds  int
 	FollowRedirects bool
+	GlobalRPS       int // rate_limit.global_rps do config — agora realmente usado
 }
 
-// RunHTTPProbing testa cada host:porta descoberto sem assumir o esquema
-// pela porta — o próprio httpx decide http vs https pela resposta real,
-// o que evita falsos negativos em portas não-padrão com TLS.
+// RunHTTPProbing testa cada combinação host:porta descoberta pelo naabu.
+//
+// Versão anterior enviava "host:porta" cru sem esquema e dependia do
+// httpx "adivinhar" http vs https — efeito colateral observado em
+// produção: hosts só-443 eram testados em :80 e salvos com URL/porta
+// inconsistentes. Agora geramos explicitamente http://host:porta e
+// https://host:porta para cada combinação; o httpx testa exatamente o
+// que mandamos e a porta registrada vem da URL real da resposta
+// (fallback: a porta do naabu). Nada é adivinhado por nenhum dos lados.
 func RunHTTPProbing(portResults []PortResult, opts HTTPOptions) ([]HTTPResult, error) {
 	utils.LogInfo(fmt.Sprintf("Iniciando sondagem HTTP/HTTPS para %d alvos...", len(portResults)))
 
@@ -52,12 +62,13 @@ func RunHTTPProbing(portResults []PortResult, opts HTTPOptions) ([]HTTPResult, e
 
 	targetMap := make(map[string]PortResult)
 	for _, res := range portResults {
-		// Sem esquema: deixa o httpx testar https primeiro e cair para
-		// http, em vez de adivinhar pela porta (8080/9000 com TLS, por
-		// exemplo, eram perdidos na versão anterior).
-		target := fmt.Sprintf("%s:%d", res.Subdomain, res.Port)
-		targetMap[target] = res
-		tmpFile.WriteString(target + "\n")
+		// Duas URLs explícitas por host:porta — determinístico, sem
+		// heurística de esquema nem reatribuição de porta.
+		for _, scheme := range []string{"http", "https"} {
+			target := fmt.Sprintf("%s://%s:%d", scheme, res.Subdomain, res.Port)
+			targetMap[target] = res
+			tmpFile.WriteString(target + "\n")
+		}
 	}
 	tmpFile.Close()
 
@@ -73,17 +84,20 @@ func RunHTTPProbing(portResults []PortResult, opts HTTPOptions) ([]HTTPResult, e
 	var results []HTTPResult
 
 	options := runner.Options{
-		Methods:         "GET",
-		InputFile:       tmpFile.Name(),
-		StatusCode:      true,
-		TechDetect:      true,
-		ExtractTitle:    true,
-		OutputServerHeader: true,
-		Hashes:          "mmh3", // favicon hash em mmh3, body hash também disponível via runner.Result
-		FollowRedirects: opts.FollowRedirects,
-		Threads:         threads,
-		Timeout:         timeout,
-		TLSGrab:         true, // necessário para popular r.TLSData com os SANs
+		Methods:              "GET",
+		InputFile:            tmpFile.Name(),
+		StatusCode:           true,
+		TechDetect:           true,
+		ExtractTitle:         true,
+		OutputServerHeader:   true,
+		Hashes:               "mmh3", // body_mmh3/header_mmh3 no Result.Hashes; favicon via flag Favicon
+		Favicon:              true,   // popula FavIconMMH3 (hash clássico tipo Shodan/search engines)
+		FollowRedirects:      opts.FollowRedirects,
+		Threads:              threads,
+		RateLimit:            effectiveRPS(opts.GlobalRPS), // limite REAL de req/s no httpx
+		Timeout:              timeout,
+		TLSGrab:              true, // necessário para popular r.TLSData com os SANs
+		DisableUpdateCheck:   true,
 		OnResult: func(r runner.Result) {
 			key := r.Input
 			origInfo, exists := targetMap[key]
@@ -103,20 +117,24 @@ func RunHTTPProbing(portResults []PortResult, opts HTTPOptions) ([]HTTPResult, e
 			sansJSON, _ := json.Marshal(sans)
 
 			bodyHash := ""
-			faviconHash := ""
+			faviconHash := r.FavIconMMH3
 			if r.Hashes != nil {
 				if v, ok := r.Hashes["body_mmh3"]; ok {
 					bodyHash = fmt.Sprintf("%v", v)
 				}
-				if v, ok := r.Hashes["favicon_mmh3"]; ok {
-					faviconHash = fmt.Sprintf("%v", v)
-				}
+			}
+
+			// Porta: confia na URL que realmente respondeu; se vier sem
+			// porta explícita, cai para a porta do alvo (naabu).
+			port := origInfo.Port
+			if p, err := strconv.Atoi(r.Port); err == nil && p > 0 {
+				port = p
 			}
 
 			results = append(results, HTTPResult{
 				Subdomain:     origInfo.Subdomain,
 				IP:            origInfo.IP,
-				Port:          origInfo.Port,
+				Port:          port,
 				Protocol:      r.Scheme,
 				StatusCode:    r.StatusCode,
 				Tech:          techStr,
@@ -126,6 +144,7 @@ func RunHTTPProbing(portResults []PortResult, opts HTTPOptions) ([]HTTPResult, e
 				BodyHash:      bodyHash,
 				FaviconHash:   faviconHash,
 				Server:        r.WebServer,
+				CDNName:       r.CDNName,
 				TLSSans:       sans,
 				TLSSansJSON:   string(sansJSON),
 			})
@@ -140,8 +159,66 @@ func RunHTTPProbing(portResults []PortResult, opts HTTPOptions) ([]HTTPResult, e
 
 	httpxRunner.RunEnumeration()
 
-	utils.LogSuccess(fmt.Sprintf("Sondagem HTTP concluída: %d aplicações web respondendo.", len(results)))
+	// Detecção de página de bloqueio compartilhada (WAF/anti-bot):
+	// o mesmo body_hash aparecendo em muitos hosts diferentes não são
+	// "muitas aplicações iguais" — é quase certamente uma única página
+	// de bloqueio servida a requests automatizados. Marcamos como ruído
+	// para o -list não tratar bloqueio como dado legítimo.
+	markBlockPages(results)
+
+	utils.LogSuccess(fmt.Sprintf("Sondagem HTTP concluída: %d respostas (%d sinalizadas como provável página de bloqueio WAF).",
+		len(results), countMarked(results)))
 	return results, nil
+}
+
+// effectiveRPS aplica um teto conservador: acima de ~100 req/s contra um
+// único alvo é convite para disparar WAF/anti-bot (que foi exatamente o
+// que aconteceu no scan da ufms.br). O valor do config continua mandando,
+// mas nunca passa do teto de cortesia.
+func effectiveRPS(cfgRPS int) int {
+	const ceiling = 100
+	if cfgRPS <= 0 {
+		return 50 // default seguro quando o campo não está setado
+	}
+	if cfgRPS > ceiling {
+		return ceiling
+	}
+	return cfgRPS
+}
+
+// blockPageMinHosts: a partir de quantos hosts DISTINTOS compartilhando o
+// mesmo body_hash consideramos "página de bloqueio" e não aplicação real.
+const blockPageMinHosts = 5
+
+func markBlockPages(results []HTTPResult) {
+	hostByHash := make(map[string]map[string]bool)
+	for _, r := range results {
+		if r.BodyHash == "" {
+			continue
+		}
+		if hostByHash[r.BodyHash] == nil {
+			hostByHash[r.BodyHash] = make(map[string]bool)
+		}
+		hostByHash[r.BodyHash][r.Subdomain] = true
+	}
+	for i := range results {
+		if results[i].BodyHash == "" {
+			continue
+		}
+		if len(hostByHash[results[i].BodyHash]) >= blockPageMinHosts {
+			results[i].BlockPage = true
+		}
+	}
+}
+
+func countMarked(results []HTTPResult) int {
+	n := 0
+	for _, r := range results {
+		if r.BlockPage {
+			n++
+		}
+	}
+	return n
 }
 
 func joinComma(items []string) string {
