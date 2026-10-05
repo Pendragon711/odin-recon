@@ -1,7 +1,6 @@
 package modules
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,7 +14,6 @@ import (
 	"odin/utils"
 
 	"github.com/mfonda/simhash"
-	"github.com/projectdiscovery/httpx/common/hashes"
 	"github.com/projectdiscovery/httpx/runner"
 	"golang.org/x/time/rate"
 )
@@ -72,10 +70,13 @@ type probeTarget struct {
 //     Resultado: todos os redirects compartilhavam o hash "-1840324437"
 //     (mmh3 do corpo base64 de ""), a detecção de página de bloqueio
 //     marcava 100% das linhas como [[WAF?]] e o crawler ficava sem
-//     nenhuma URL. Correção: rodamos o httpx SEM Hashes e calculamos
-//     body_mmh3/body_simhash nós mesmos apenas quando há corpo real
-//     (mesmas funções do pacote common/hashes do httpx → valores
-//     idênticos aos do flag -hash).
+//     nenhuma URL. Correção: não usamos options.Hashes; extraímos o
+//     corpo DECODIFICADO real via r.Response.Data (o mesmo slice que o
+//     httpx hashearia) e só computamos mmh3/simhash quando ele é não
+//     vazio. Nunca parseamos r.Raw para obter o corpo: em respostas
+//     gzip/deflate/chunked o Raw contém bytes binários pós-headers que
+//     corrompem qualquer split por \r\n\r\n (foi a fonte do bug do
+//     "18446744073709551615", simhash ~0xFFFF... de lixo binário).
 //
 // Rate limit: além do RateLimit interno do httpx, um limiter global
 // (golang.org/x/time/rate) segura o OnResult, garantindo que a taxa
@@ -170,9 +171,18 @@ func RunHTTPProbing(portResults []PortResult, opts HTTPOptions) ([]HTTPResult, e
 			}
 			sansJSON, _ := json.Marshal(sans)
 
-			// --- Hashes: calculados aqui, NUNCA cegos contra corpo vazio ---
-			raw := []byte(r.Raw)
-			bodyHash, simHash := computeBodyHashes(raw)
+			// --- Hashes: corpo DECODIFICADO real via r.Response.Data ---
+			// É exatamente o slice que o httpx hashearia com -hash mmh3,simhash
+			// (resp.Data), e já vem com gzip/chunked decodificados. NÃO
+			// parseamos r.Raw: em respostas comprimidas/transfer-encoding o
+			// Raw tem bytes binários pós-headers que quebram qualquer split
+			// por \r\n\r\n e geram hashes de lixo (o bug do simhash
+			// 18446744073709551615 visto no scan da uems.br).
+			var body []byte
+			if r.Response != nil {
+				body = r.Response.Data
+			}
+			bodyHash, simHash := computeBodyHashes(body)
 
 			// Fallback honesto para redirects/304 sem corpo: em vez de
 			// hashear o corpo vazio (todos colidiriam no mesmo hash e a
