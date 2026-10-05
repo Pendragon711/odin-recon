@@ -15,7 +15,6 @@ import (
 	"odin/utils"
 
 	"github.com/mfonda/simhash"
-	"github.com/projectdiscovery/httpx/common/customheader"
 	"github.com/projectdiscovery/httpx/common/hashes"
 	"github.com/projectdiscovery/httpx/runner"
 	"golang.org/x/time/rate"
@@ -137,8 +136,11 @@ func RunHTTPProbing(portResults []PortResult, opts HTTPOptions) ([]HTTPResult, e
 		TechDetect:         true,
 		ExtractTitle:       true,
 		OutputServerHeader: true,
-		ResponseHeaders:    true, // necessário p/ calcular mmh3 do header no fallback de redirect sem Location
-		UserAgent:          userAgent,
+		// Em httpx >= v1.9 os headers da resposta já vêm em
+		// r.ResponseHeaders/r.RawHeaders no Result; não existe opção
+		// para ligar/desligar isso (o antigo campo ResponseHeaders e o
+		// UserAgent saíram de runner.Options).
+		CustomHeaders:      []string{"User-Agent: " + userAgent},
 		FollowRedirects:    opts.FollowRedirects,
 		Threads:            threads,
 		RateLimit:          rps, // limite de req/s dentro do próprio httpx
