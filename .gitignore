@@ -1,0 +1,14 @@
+# Banco de dados local (contém dados do scan de alvos reais - NUNCA commitar)
+db/
+*.db
+*.sqlite
+
+# Config local pode conter API keys (certifique-se antes de commitar!)
+config.yaml
+
+# Binários compilados
+odin.exe
+*.exe
+
+# Artefatos de go
+/vendor/
