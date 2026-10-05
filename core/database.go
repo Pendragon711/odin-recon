@@ -100,10 +100,11 @@ func createTables() error {
 		url TEXT NOT NULL,
 		content_length INTEGER,
 		body_hash TEXT,
+		simhash INTEGER,            -- simhash 64-bit do corpo p/ detectar página de bloqueio quase-idêntica (nonce/CSRF dinâmico)
 		favicon_hash TEXT,
 		server TEXT,
 		cdn TEXT,                 -- CDN/WAF detectado pelo httpx (ex.: cloudflare)
-		is_blockpage BOOLEAN DEFAULT 0, -- 1 = body_hash repetido em muitos hosts (ruído de WAF)
+		is_blockpage BOOLEAN DEFAULT 0, -- 1 = body_hash/simhash repetido em muitos hosts (ruído de WAF)
 		tls_sans TEXT,            -- JSON array de SANs do certificado
 		first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
 		last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -140,6 +141,7 @@ func createTables() error {
 	addColumns := []string{
 		`ALTER TABLE http_services ADD COLUMN cdn TEXT`,
 		`ALTER TABLE http_services ADD COLUMN is_blockpage BOOLEAN DEFAULT 0`,
+		`ALTER TABLE http_services ADD COLUMN simhash INTEGER`,
 	}
 	for _, stmt := range addColumns {
 		DB.Exec(stmt) // best-effort; schema acima já cobre bancos novos
@@ -279,6 +281,7 @@ type HTTPServiceRow struct {
 	URL           string
 	ContentLength int
 	BodyHash      string
+	SimHash       uint64
 	FaviconHash   string
 	Server        string
 	CDN           string
@@ -297,14 +300,15 @@ func SaveHTTPServices(scanID int64, rows []HTTPServiceRow) error {
 	stmt, err := tx.Prepare(`
 		INSERT INTO http_services
 			(scan_id, host, ip, port, protocol, status_code, title, tech, url,
-			 content_length, body_hash, favicon_hash, server, cdn, is_blockpage, tls_sans)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 content_length, body_hash, simhash, favicon_hash, server, cdn, is_blockpage, tls_sans)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(scan_id, url) DO UPDATE SET
 			status_code = excluded.status_code,
 			title = excluded.title,
 			tech = excluded.tech,
 			content_length = excluded.content_length,
 			body_hash = excluded.body_hash,
+			simhash = excluded.simhash,
 			favicon_hash = excluded.favicon_hash,
 			server = excluded.server,
 			cdn = excluded.cdn,
@@ -321,7 +325,7 @@ func SaveHTTPServices(scanID int64, rows []HTTPServiceRow) error {
 	for _, r := range rows {
 		_, err := stmt.Exec(
 			scanID, r.Host, r.IP, r.Port, r.Protocol, r.StatusCode, r.Title, r.Tech, r.URL,
-			r.ContentLength, r.BodyHash, r.FaviconHash, r.Server, r.CDN, r.IsBlockPage, r.TLSSans,
+			r.ContentLength, r.BodyHash, int64(r.SimHash), r.FaviconHash, r.Server, r.CDN, r.IsBlockPage, r.TLSSans,
 		)
 		if err != nil {
 			utils.LogWarning(fmt.Sprintf("Falha ao salvar serviço HTTP %s: %v", r.URL, err))
