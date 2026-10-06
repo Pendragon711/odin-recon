@@ -1,240 +1,31 @@
 # Odin — Advanced Web Reconnaissance Pipeline
 
-**Odin** é uma ferramenta de **Web Reconnaissance desenvolvida em Go** para Pentest e Red Team. Ela orquestra um pipeline modular de descoberta de ativos, DNS, portas, HTTP e crawling, com detecção avançada de WAF e isolamento de dados por alvo.
+**Odin** é uma ferramenta de **Web Reconnaissance desenvolvida em Go** para Pentest e Red Team. Ela orquestra um pipeline modular de descoberta de ativos, resolução DNS, port scanning, HTTP probing e crawling, com mecanismos de detecção de WAF e isolamento dos dados por alvo.
 
-> ⚠️ **Aviso legal:** o Odin deve ser utilizado exclusivamente em ativos para os quais você possui autorização para realizar testes. O usuário é integralmente responsável pelo uso da ferramenta e por suas ações.
+> ⚠️ **Aviso legal:** o Odin deve ser utilizado exclusivamente em ativos para os quais você possui autorização para realizar testes. O usuário é responsável por suas ações e pelo uso da ferramenta.
 
 ---
 
 ## ✨ Características
 
-* **Pipeline resiliente** — falhas parciais em módulos não interrompem o scan completo.
-* **Detecção de WAF em duas camadas** — análise por assinatura/keywords e clusterização utilizando SimHash.
-* **Feedback loop** — SANs de certificados TLS, CNAMEs e hosts encontrados em arquivos JavaScript podem ser reinjetados automaticamente no escopo.
-* **Banco isolado por alvo** — cada domínio possui seu próprio banco SQLite, reduzindo conflitos entre scans.
-* **Exportação limpa** — exporta URLs válidas removendo ruído causado por páginas de bloqueio/WAF.
-* **Controle de escopo** — permite definir hosts incluídos e excluídos durante o processo de recon.
+* **Pipeline resiliente** — falhas parciais em uma etapa não interrompem todo o processo.
+* **Descoberta de subdomínios** — enumeração passiva utilizando Subfinder.
+* **DNS Resolution** — resolução de subdomínios, validação de hosts e detecção de Wildcard DNS.
+* **Port Scanning** — descoberta de portas TCP utilizando Naabu.
+* **HTTP Probing** — identificação de serviços HTTP/HTTPS, status codes, títulos e tecnologias.
+* **Detecção de WAF** — identificação baseada em assinaturas e análise de similaridade.
+* **Crawling** — descoberta de URLs e recursos através do Katana.
+* **Feedback loop** — novos hosts encontrados durante o processo podem ser reinseridos no escopo.
+* **Banco isolado por alvo** — cada domínio possui seu próprio banco SQLite.
+* **Exportação limpa** — exporta URLs válidas sem resultados identificados como WAF ou blockpage.
 * **Perfis de execução** — `quick`, `standard` e `deep`.
-* **Rate limiting global** — controle da quantidade de requisições por segundo.
-* **Sem APIs pagas** — utiliza ferramentas open source e fontes públicas de descoberta.
+* **Sem APIs pagas** — utiliza ferramentas open source e fontes públicas.
 
 ---
 
-## 🏗️ Arquitetura
+## 🚀 Instalação
 
-O Odin organiza o processo de reconhecimento em módulos independentes:
-
-```text
-┌─────────────────────────────────────────────┐
-│                    ODIN                     │
-│        Advanced Web Reconnaissance          │
-└──────────────────────┬──────────────────────┘
-                       │
-                       ▼
-              ┌─────────────────┐
-              │  01 Discovery   │
-              │ Subfinder       │
-              │ Bruteforce      │
-              │ Permutation     │
-              └────────┬────────┘
-                       │
-                       ▼
-              ┌─────────────────┐
-              │     02 DNS      │
-              │ Resolution      │
-              │ Wildcard        │
-              │ AXFR            │
-              └────────┬────────┘
-                       │
-                       ▼
-              ┌─────────────────┐
-              │    03 Ports     │
-              │     Naabu       │
-              │  Pre-resolved   │
-              │      IPs        │
-              └────────┬────────┘
-                       │
-                       ▼
-              ┌─────────────────┐
-              │    04 HTTP      │
-              │     HTTPx       │
-              │  WAF Detection  │
-              │   Blockpages    │
-              └────────┬────────┘
-                       │
-                       ▼
-              ┌─────────────────┐
-              │   05 Crawler    │
-              │     Katana      │
-              │  JS Host Extract │
-              └────────┬────────┘
-                       │
-                       ▼
-              ┌─────────────────┐
-              │ SQLite Database │
-              │  Per Target     │
-              └─────────────────┘
-```
-
-### Pipeline
-
-| Etapa | Módulo    | Função                                       |
-| ----- | --------- | -------------------------------------------- |
-| 01    | Discovery | Descoberta de subdomínios e hosts            |
-| 02    | DNS       | Resolução, wildcard detection e AXFR         |
-| 03    | Ports     | Descoberta de portas com Naabu               |
-| 04    | HTTP      | Probing HTTP/HTTPS e detecção de WAF         |
-| 05    | Crawler   | Crawling e descoberta de hosts em JavaScript |
-
----
-
-## 🔍 Módulos
-
-### 01 — Discovery
-
-Responsável pela descoberta inicial de ativos.
-
-Utiliza:
-
-* Subfinder
-* DNS bruteforce
-* Permutação de subdomínios
-
-O módulo também suporta limitação do número de seeds utilizados para geração de permutações.
-
----
-
-### 02 — DNS
-
-Executa resolução DNS em massa e valida informações relacionadas ao domínio.
-
-Recursos:
-
-* Resolução de registros DNS
-* Detecção de wildcard DNS
-* Identificação de registros CNAME
-* Tentativa de AXFR
-* Concorrência configurável
-
----
-
-### 03 — Port Scan
-
-Utiliza **Naabu** para descoberta de portas nos IPs previamente resolvidos.
-
-O fluxo evita resolução DNS redundante:
-
-```text
-Hosts descobertos
-       │
-       ▼
-   DNS Resolution
-       │
-       ▼
-      IPs
-       │
-       ▼
-     Naabu
-       │
-       ▼
- Open Ports
-```
-
----
-
-### 04 — HTTP
-
-Executa probing HTTP/HTTPS utilizando **HTTPx**.
-
-Além da identificação dos serviços HTTP, o módulo possui mecanismos para detectar:
-
-* WAF
-* Blockpages
-* Respostas anômalas
-* Assinaturas conhecidas
-* Padrões semelhantes utilizando SimHash
-
-A detecção utiliza duas camadas:
-
-```text
-HTTP Response
-      │
-      ├──► Keyword / Signature Detection
-      │
-      └──► SimHash Clustering
-                │
-                ▼
-          WAF / Blockpage
-```
-
----
-
-### 05 — Crawler
-
-Utiliza **Katana** para crawling dos endpoints encontrados.
-
-Além da descoberta de URLs, o módulo pode extrair hosts encontrados em arquivos JavaScript e reinjetá-los no pipeline de reconhecimento.
-
-Isso cria um **feedback loop**:
-
-```text
-Recon
-  │
-  ▼
-HTTP
-  │
-  ▼
-Crawler
-  │
-  ├──► URLs
-  ├──► Hosts
-  └──► JS references
-          │
-          ▼
-     Scope Expansion
-          │
-          ▼
-        Recon
-```
-
----
-
-## 🔄 Feedback Loop
-
-O Odin pode ampliar dinamicamente o conjunto de ativos descobertos durante o scan.
-
-Fontes utilizadas:
-
-* SANs de certificados TLS
-* CNAMEs
-* Hosts encontrados em JavaScript
-
-Exemplo:
-
-```text
-example.com
-    │
-    ├── api.example.com
-    ├── dev.example.com
-    └── www.example.com
-             │
-             ▼
-        HTTP/Crawler
-             │
-             ├── api-internal.example.com
-             └── cdn.example.com
-                       │
-                       ▼
-                  Novo escopo
-```
-
-Os novos hosts passam novamente pelo pipeline quando considerados dentro das regras de escopo configuradas.
-
----
-
-## 📦 Requisitos
-
-### Software
+### Requisitos
 
 * Go
 * Git
@@ -243,34 +34,24 @@ Os novos hosts passam novamente pelo pipeline quando considerados dentro das reg
 * HTTPx
 * Katana
 
-Dependendo da configuração utilizada, ferramentas adicionais de DNS/reconhecimento podem ser necessárias.
+As ferramentas externas devem estar disponíveis no `PATH` do sistema.
 
----
-
-## 🚀 Instalação
-
-### Windows — PowerShell
+### Windows / PowerShell
 
 Clone o repositório:
 
 ```powershell
-git clone https://github.com/seu-usuario/odin.git
+git clone https://github.com/Pendragon711/odin.git
 cd odin
 ```
 
-Instale as dependências:
+Compile o projeto:
 
 ```powershell
-go mod tidy
+go build -o odin .
 ```
 
-Compile:
-
-```powershell
-go build -o odin.exe .
-```
-
-O executável será criado como:
+O executável será criado na raiz:
 
 ```text
 odin.exe
@@ -278,90 +59,511 @@ odin.exe
 
 ---
 
-## ⚡ Uso
+# 📖 Uso
 
-### Scan rápido
+O Odin foi projetado para manter o fluxo de reconhecimento simples:
 
-```powershell
-.\odin.exe -d exemplo.com -profile quick
+```text
+Scan → Consulta → Exportação
 ```
 
-### Scan padrão
+## Flags disponíveis
 
-```powershell
-.\odin.exe -d exemplo.com -profile standard
-```
+| Flag       | Tipo     | Descrição                                                                                                                          |
+| ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `-d`       | `string` | Define o domínio alvo do reconhecimento. Inicia o pipeline e cria automaticamente um banco SQLite isolado para o domínio em `db/`. |
+| `-profile` | `string` | Define o nível de profundidade do scan. Opções: `quick`, `standard` e `deep`. Sobrescreve o perfil definido no `config.yaml`.      |
+| `-list`    | `bool`   | Consulta os resultados já armazenados no banco do alvo. Não executa um novo scan. Deve ser utilizado com `-d`.                     |
+| `-status`  | `int`    | Filtra os resultados exibidos pelo código HTTP. Use `0` para visualizar todos os resultados.                                       |
+| `-export`  | `string` | Exporta URLs válidas que não foram marcadas como WAF ou blockpage para o arquivo especificado.                                     |
 
-### Scan profundo
+---
 
-```powershell
-.\odin.exe -d exemplo.com -profile deep
+## 🎯 Perfis de Scan
+
+### Quick
+
+Focado em velocidade e cobertura inicial.
+
+* Portas: `80`, `443`
+* Descoberta passiva de subdomínios
+* Crawling superficial
+* Ideal para triagem inicial de grandes superfícies
+
+**Tempo estimado:** 1–5 minutos.
+
+```bash
+odin -d alvo.com -profile quick
 ```
 
 ---
 
-## 📊 Visualização dos resultados
+### Standard
 
-Listar todos os resultados de um alvo:
+Perfil recomendado para a maioria dos pentests.
 
-```powershell
-.\odin.exe -list -d exemplo.com
-```
+Inclui:
 
-Filtrar por código HTTP:
+* Portas administrativas comuns:
 
-```powershell
-.\odin.exe -list -d exemplo.com -status 200
+  * `8080`
+  * `8443`
+  * `3000`
+  * `4443`
+  * `9090`
+* Permutação limitada de subdomínios
+* Crawling com profundidade moderada
+
+**Tempo estimado:** 5–20 minutos.
+
+```bash
+odin -d alvo.com -profile standard
 ```
 
 ---
 
-## 📤 Exportação
+### Deep
 
-Exportar os alvos HTTP identificados, removendo resultados considerados ruído de WAF:
+Perfil de maior cobertura.
 
-```powershell
-.\odin.exe -d exemplo.com -export alvos.txt
+Inclui:
+
+* Top 1000 portas TCP
+* Bruteforce extensivo de subdomínios
+* Wordlists maiores
+* Crawling profundo
+* Múltiplas iterações
+
+Recomendado para alvos menores quando uma cobertura mais ampla da superfície de ataque for necessária.
+
+**Tempo estimado:** 20–60 minutos.
+
+```bash
+odin -d alvo.com -profile deep
 ```
 
-O arquivo gerado pode ser utilizado como entrada para outras ferramentas de segurança.
+---
+
+# 💻 Exemplos Práticos
+
+## Scan rápido
+
+```bash
+odin -d alvo.com -profile quick
+```
+
+## Scan padrão
+
+```bash
+odin -d alvo.com -profile standard
+```
+
+## Scan profundo
+
+```bash
+odin -d alvo.com -profile deep
+```
+
+## Consultar todos os resultados
+
+Consulta os serviços HTTP descobertos anteriormente:
+
+```bash
+odin -list -d alvo.com
+```
+
+## Filtrar por código HTTP
+
+Exibir somente respostas `403`:
+
+```bash
+odin -list -d alvo.com -status 403
+```
+
+Exibir somente respostas `200`:
+
+```bash
+odin -list -d alvo.com -status 200
+```
+
+Use `0` para visualizar todos os resultados:
+
+```bash
+odin -list -d alvo.com -status 0
+```
+
+## Exportar alvos limpos
+
+Exportar URLs válidas para utilização posterior em ferramentas como Nuclei:
+
+```bash
+odin -d alvo.com -export alvos_limpos.txt
+```
+
+O arquivo resultante contém uma URL por linha:
+
+```text
+https://alvo.com
+https://api.alvo.com
+https://admin.alvo.com
+```
+
+---
+
+# 🏗️ Arquitetura do Pipeline
+
+O Odin executa as seguintes fases em sequência:
+
+```text
+                    ┌─────────────────────┐
+                    │        ODIN         │
+                    │ Web Recon Pipeline  │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │  01. Discovery      │
+                    │     Subfinder       │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │  02. DNS Resolution │
+                    │ Wildcard Detection  │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │  03. Port Scanning  │
+                    │       Naabu         │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │   04. HTTP Probing  │
+                    │       HTTPX         │
+                    │    WAF Detection    │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │    05. Crawling     │
+                    │       Katana        │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │    SQLite / DB      │
+                    │   Per Target        │
+                    └─────────────────────┘
+```
+
+### 01 — Discovery
+
+Enumeração passiva de subdomínios utilizando **Subfinder** e fontes públicas, incluindo:
+
+* Certificate Transparency
+* DNS Dumpster
+* HackerTarget
+* Outras fontes públicas suportadas pelo Subfinder
+
+O resultado alimenta as etapas seguintes do pipeline.
+
+---
+
+### 02 — DNS Resolution
+
+Validação dos subdomínios descobertos.
+
+Responsabilidades:
+
+* Resolução DNS
+* Identificação de endereços IP
+* Detecção de Wildcard DNS
+* Eliminação de falsos positivos
+* Validação dos hosts descobertos
+
+---
+
+### 03 — Port Scanning
+
+Utiliza **Naabu** para identificar portas TCP abertas nos hosts validados.
+
+O conjunto de portas depende do perfil:
+
+| Perfil     | Portas                        |
+| ---------- | ----------------------------- |
+| `quick`    | `80`, `443`                   |
+| `standard` | Portas administrativas comuns |
+| `deep`     | Top 1000 TCP                  |
+
+---
+
+### 04 — HTTP Probing
+
+Utiliza **HTTPX** para sondar os serviços encontrados.
+
+O módulo coleta informações como:
+
+* URL
+* HTTP status code
+* Page title
+* Tecnologias
+* Headers
+* CDN/WAF
+* Similaridade de respostas
+
+A identificação de tecnologias utiliza informações obtidas através de headers e fingerprinting baseado em Wappalyzer.
+
+---
+
+### 05 — Crawling
+
+Utiliza **Katana** para rastrear os hosts HTTP ativos.
+
+O crawler pode descobrir:
+
+* URLs internas
+* URLs externas
+* Endpoints
+* Recursos adicionais
+* Hosts referenciados em aplicações web
+
+A profundidade do crawling varia conforme o perfil selecionado.
+
+---
+
+# 🔄 Feedback Loop
+
+O Odin pode utilizar informações descobertas durante o pipeline para expandir a superfície de reconhecimento.
+
+Fontes de novos ativos incluem:
+
+* SANs de certificados TLS
+* CNAMEs
+* Hosts encontrados em JavaScript
+* Recursos descobertos durante crawling
+
+Fluxo conceitual:
+
+```text
+Discovery
+    │
+    ▼
+DNS
+    │
+    ▼
+HTTP
+    │
+    ▼
+Crawler
+    │
+    ├── URLs
+    ├── Hosts
+    └── JavaScript references
+             │
+             ▼
+       Novos ativos
+             │
+             ▼
+      Scope Validation
+             │
+             ▼
+          Recon
+```
+
+Esse mecanismo permite que o Odin encontre ativos que não estavam presentes na primeira etapa de descoberta.
+
+---
+
+# 🧠 Decisões Técnicas
+
+## Por que Subfinder e não Amass?
+
+O **Amass**, da OWASP, é uma ferramenta poderosa para OSINT e enumeração profunda de infraestrutura. Entretanto, em superfícies muito grandes pode gerar maior quantidade de ruído, consumir mais memória e exigir configuração adicional de fontes e API keys.
+
+O **Subfinder** foi escolhido como ferramenta principal do Odin por oferecer uma boa relação entre:
+
+* velocidade;
+* cobertura;
+* simplicidade;
+* foco em superfície web;
+* integração com o ecossistema ProjectDiscovery.
+
+O Amass continua sendo útil para cenários de enumeração de infraestrutura mais profunda e pode ser utilizado separadamente antes de alimentar resultados adicionais ao Odin.
+
+---
+
+## Por que SQLite e não PostgreSQL?
+
+O Odin utiliza **SQLite** porque o banco:
+
+* é embutido;
+* não necessita de servidor;
+* possui configuração mínima;
+* facilita a portabilidade;
+* permite um banco independente por alvo.
 
 Exemplo:
 
 ```text
-https://example.com
-https://api.example.com
-https://dev.example.com
+db/
+├── alvo1.com_recon.db
+├── alvo2.com_recon.db
+└── alvo3.com_recon.db
 ```
+
+A separação por alvo reduz conflitos e facilita o gerenciamento dos resultados.
+
+A pasta `db/` também pode ser copiada para outra máquina para transportar os resultados armazenados.
 
 ---
 
-## 🗄️ Banco de Dados
+## Por que Go?
 
-Cada alvo possui um banco SQLite independente:
+Go foi escolhido devido a características importantes para uma ferramenta de recon:
+
+* compilação nativa;
+* binário único;
+* ausência de runtime externo;
+* concorrência nativa com goroutines;
+* bom desempenho;
+* facilidade de distribuição;
+* ecossistema maduro de ferramentas e bibliotecas de segurança.
+
+O projeto também se integra diretamente com ferramentas do ecossistema **ProjectDiscovery**.
+
+---
+
+# 🗄️ Banco de Dados
+
+Cada alvo possui seu próprio banco SQLite:
 
 ```text
 db/
-├── exemplo.com_recon.db
-├── target.com_recon.db
+├── alvo.com_recon.db
+├── api.alvo.com_recon.db
 └── outro-alvo.com_recon.db
 ```
 
-Esse modelo reduz conflitos entre diferentes alvos e facilita o gerenciamento dos resultados.
+O banco é criado automaticamente quando o alvo é processado.
 
-### Remover os dados de um alvo
+### Limpar os dados de um alvo
 
 No PowerShell:
 
 ```powershell
-Remove-Item db\exemplo.com_recon.db
+Remove-Item db\alvo.com_recon.db
 ```
 
-> ⚠️ A remoção do banco apaga os resultados armazenados para aquele alvo.
+> ⚠️ A remoção do arquivo apaga os resultados armazenados para aquele alvo.
 
 ---
 
-## ⚙️ Configuração
+# 🔗 Workflow / Chaining
+
+Os resultados exportados pelo Odin podem alimentar outras ferramentas utilizadas durante um assessment.
+
+### Odin → Nuclei
+
+Primeiro, exporte os alvos:
+
+```bash
+odin -d alvo.com -export alvos_limpos.txt
+```
+
+Depois:
+
+```bash
+nuclei -l alvos_limpos.txt -t cves/ -rate-limit 50
+```
+
+### Odin → FFUF
+
+Os hosts encontrados também podem ser utilizados como base para fuzzing:
+
+```bash
+ffuf -w wordlist.txt -u https://alvo.com/FUZZ -mc 200,401,403 -t 50
+```
+
+### Odin → Wafw00f
+
+Para análise adicional de WAF:
+
+```bash
+wafw00f -i alvos_limpos.txt
+```
+
+> As ferramentas acima são externas ao Odin. O objetivo do chaining é permitir que os resultados da fase de reconnaissance sejam utilizados em etapas posteriores do assessment.
+
+---
+
+# 📁 Estrutura do Projeto
+
+```text
+odin/
+├── main.go              # Ponto de entrada, parsing de flags e orquestração
+├── config.yaml          # Configuração de perfis e parâmetros
+├── go.mod               # Dependências do Go
+├── go.sum               # Checksums das dependências
+│
+├── core/
+│   ├── banner.go        # Banner ASCII personalizado
+│   ├── config.go        # Carregamento e parsing do config.yaml
+│   └── db.go            # Inicialização e operações no SQLite
+│
+├── modules/
+│   ├── 01_discovery.go  # Enumeração de subdomínios
+│   ├── 02_dns.go        # Resolução DNS e wildcard
+│   ├── 03_ports.go      # Varredura de portas
+│   ├── 04_http.go       # HTTP probing e detecção de WAF
+│   └── 05_crawler.go    # Crawling de URLs
+│
+├── utils/
+│   ├── logger.go        # Sistema de logs formatados
+│   └── helpers.go       # Funções auxiliares, SimHash etc.
+│
+├── db/                  # Bancos isolados por alvo
+│   └── <alvo>_recon.db
+│
+└── README.md
+```
+
+---
+
+# 🛠️ Tecnologias
+
+Odin utiliza ferramentas e tecnologias do ecossistema de segurança:
+
+* **Go**
+* **Subfinder**
+* **Naabu**
+* **HTTPX**
+* **Katana**
+* **SQLite**
+* **Wappalyzer**
+* **SimHash**
+
+---
+
+# 🧩 Resiliência
+
+O pipeline foi projetado para tolerar falhas parciais.
+
+Uma falha em determinada etapa não precisa interromper todo o processo:
+
+```text
+Discovery ──► DNS ──► Ports ──► HTTP ──► Crawler
+    ✓          ✓        ✗         ✓         ✓
+                       │
+                       └── falha isolada
+```
+
+Essa abordagem permite que os resultados válidos das demais etapas continuem sendo processados.
+
+---
+
+# ⚙️ Configuração
 
 As configurações principais ficam em:
 
@@ -369,9 +571,7 @@ As configurações principais ficam em:
 config.yaml
 ```
 
-### Perfis
-
-Odin possui três perfis:
+Os perfis disponíveis são:
 
 ```text
 quick
@@ -379,7 +579,7 @@ standard
 deep
 ```
 
-### Exemplo
+Exemplo de configuração:
 
 ```yaml
 profile: standard
@@ -403,22 +603,18 @@ crawler:
   enabled: true
 ```
 
----
+### Principais parâmetros
 
-## 🔧 Principais configurações
-
-| Configuração                      | Descrição                       |     Padrão |
-| --------------------------------- | ------------------------------- | ---------: |
+| Configuração                      | Descrição                       | Exemplo    |
+| --------------------------------- | ------------------------------- | ---------- |
 | `profile`                         | Perfil de execução              | `standard` |
-| `scope.include`                   | Hosts permitidos no escopo      |       `[]` |
-| `scope.exclude`                   | Hosts excluídos do escopo       |       `[]` |
-| `dns.concurrency`                 | Consultas DNS simultâneas       |      `500` |
-| `dns.record_types`                | Tipos de registros consultados  |        `A` |
-| `discovery.max_permutation_seeds` | Limite de seeds para permutação |      `200` |
-| `rate_limit.global_rps`           | Limite global de requisições/s  |       `50` |
-| `crawler.enabled`                 | Habilita/desabilita crawling    |     `true` |
-
-### Permutações sem limite
+| `scope.include`                   | Hosts permitidos                | `[]`       |
+| `scope.exclude`                   | Hosts excluídos                 | `[]`       |
+| `dns.concurrency`                 | Concorrência DNS                | `500`      |
+| `dns.record_types`                | Tipos de registros DNS          | `A`        |
+| `discovery.max_permutation_seeds` | Limite de seeds para permutação | `200`      |
+| `rate_limit.global_rps`           | Limite global de requisições/s  | `50`       |
+| `crawler.enabled`                 | Habilita crawling               | `true`     |
 
 Para remover o limite de seeds:
 
@@ -427,184 +623,58 @@ discovery:
   max_permutation_seeds: -1
 ```
 
-> ⚠️ Valores muito altos podem aumentar significativamente o volume de requisições e o tempo de execução.
+> ⚠️ Valores elevados de concorrência ou ausência de limites podem aumentar significativamente o volume de tráfego e o tempo de processamento.
 
 ---
 
-## 🔗 Workflow / Chaining
+# 🐛 Troubleshooting
 
-O Odin foi projetado para funcionar como parte de um pipeline maior de segurança.
+## `database is locked`
 
-### 1. Recon + exportação
+Evite executar dois scans simultaneamente para o mesmo alvo.
 
-```powershell
-.\odin.exe -d ufms.br -profile standard -export alvos.txt
+```text
+Scan A ──► alvo.com_recon.db
+Scan B ──► alvo.com_recon.db
+                 ↑
+              conflito
 ```
 
-### 2. Vulnerability scanning
+Execute apenas um processo por alvo por vez.
 
-Os alvos exportados podem ser utilizados como entrada para ferramentas como Nuclei:
+---
+
+## Scan muito lento
+
+Experimente utilizar o perfil `quick`:
 
 ```bash
-nuclei -l alvos.txt -t cves/ -rate-limit 50
+odin -d alvo.com -profile quick
 ```
 
-### 3. Fuzzing
-
-Exemplo utilizando FFUF:
-
-```bash
-ffuf -w wordlist.txt -u https://target.com/FUZZ -mc 200,401,403 -t 50
-```
-
-### 4. Detecção adicional de WAF
-
-Opcionalmente:
-
-```bash
-wafw00f -i alvos.txt
-```
-
-> Essas ferramentas são etapas externas ao Odin. O objetivo do chaining é permitir que os resultados do reconhecimento sejam utilizados em outras fases do assessment.
+Também é possível revisar a concorrência DNS no `config.yaml`.
 
 ---
 
-## 📁 Estrutura do Projeto
+## Muitos resultados relacionados a WAF
 
-```text
-Odin/
-├── main.go
-├── config.yaml
-├── core/
-│   ├── config/
-│   ├── database/
-│   ├── engine/
-│   └── scope/
-├── modules/
-│   ├── 01_discovery/
-│   ├── 02_dns/
-│   ├── 03_port/
-│   ├── 04_http/
-│   └── 05_crawler/
-├── utils/
-│   ├── helpers/
-│   ├── logger/
-│   ├── ratelimit/
-│   └── simhash/
-├── db/
-│   └── <target>_recon.db
-├── go.mod
-├── go.sum
-├── LICENSE
-└── README.md
-```
-
----
-
-## 🛠️ Tecnologias
-
-Odin utiliza ferramentas e bibliotecas do ecossistema de segurança e Go:
-
-* **Go**
-* **Subfinder**
-* **Amass**
-* **DNSx**
-* **Naabu**
-* **HTTPx**
-* **Katana**
-* **SQLite**
-* **modernc.org/sqlite**
-
----
-
-## 🧠 Resiliência
-
-O pipeline foi projetado para tolerar falhas individuais.
-
-Em vez de interromper todo o processo quando um módulo apresenta erro:
-
-```text
-Discovery ──► DNS ──► Ports ──► HTTP ──► Crawler
-    ✓          ✓        ✗         ✓         ✓
-                         │
-                         └── falha isolada
-```
-
-Os demais módulos podem continuar processando os dados disponíveis.
-
----
-
-## 🐛 Troubleshooting
-
-### `database is locked`
-
-Não execute dois scans simultaneamente para o mesmo alvo.
-
-```text
-Scan A ──► exemplo.com_recon.db
-Scan B ──► exemplo.com_recon.db
-             ↑
-          conflito
-```
-
-Execute scans diferentes ou aguarde o primeiro processo terminar.
-
----
-
-### Scan muito lento
-
-Utilize o perfil rápido:
-
-```powershell
-.\odin.exe -d exemplo.com -profile quick
-```
-
-Ou ajuste a concorrência DNS:
-
-```yaml
-dns:
-  concurrency: 500
-```
-
-> Aumentar concorrência nem sempre resulta em maior velocidade. O desempenho também depende de rede, DNS, rate limiting e comportamento dos alvos.
-
----
-
-### `go mod tidy` falha
-
-Atualize a dependência correspondente:
-
-```powershell
-go get github.com/projectdiscovery/httpx@latest
-```
-
-Depois:
-
-```powershell
-go mod tidy
-```
-
----
-
-### Muitos resultados `[[WAF?]]`
-
-Ajuste o parâmetro de sensibilidade relacionado à detecção de blockpages no módulo:
-
-```text
-modules/04_http/
-```
-
-Procure pela configuração:
+A sensibilidade da detecção pode ser ajustada no módulo HTTP, especialmente no parâmetro relacionado à identificação de blockpages:
 
 ```text
 blockPageMinHosts
 ```
 
-Ajuste o valor conforme o comportamento observado nos alvos.
+O parâmetro está relacionado ao módulo:
+
+```text
+modules/04_http.go
+```
+
+Ajuste conforme o comportamento observado nos alvos autorizados.
 
 ---
 
-## 📌 Roadmap
+# 📌 Roadmap
 
 Possíveis evoluções do projeto:
 
@@ -613,40 +683,57 @@ Possíveis evoluções do projeto:
 * [ ] Dashboard para visualização dos resultados
 * [ ] Exportação JSON/CSV
 * [ ] Melhor gerenciamento de escopo
-* [ ] Mais estratégias de descoberta
+* [ ] Novas estratégias de descoberta
 * [ ] Integração com novos crawlers
 * [ ] Métricas de execução do pipeline
 
 ---
 
-## ⚠️ Uso Responsável
+# ⚠️ Aviso Legal
 
-O Odin é uma ferramenta de segurança destinada a **testes autorizados**.
+O Odin foi desenvolvido exclusivamente para **fins educacionais e testes de intrusão autorizados**.
 
-Utilize-o somente em:
+Utilize a ferramenta somente em:
 
 * ativos próprios;
 * ambientes de laboratório;
 * programas de Bug Bounty dentro do escopo permitido;
 * avaliações de segurança autorizadas;
-* ambientes onde você possui autorização explícita.
+* sistemas para os quais você possui autorização explícita.
 
-O desenvolvedor e os contribuidores não são responsáveis por danos causados pelo uso indevido da ferramenta.
+O uso desta ferramenta contra sistemas sem autorização pode ser ilegal.
 
----
+**Sempre obtenha autorização antes de realizar atividades de reconhecimento ou testes de segurança.**
 
-## 📄 Licença
-
-Este projeto está disponível sob a licença **MIT**.
-
-Consulte o arquivo [`LICENSE`](LICENSE) para obter os termos completos.
+O autor não se responsabiliza pelo uso indevido da ferramenta.
 
 ---
 
-## 👤 Autor
+# 📜 Licença
 
-Desenvolvido com foco em:
+Este projeto é distribuído sob a licença **MIT**.
 
-**Precisão · Performance · Modularidade · Automação · Segurança**
+Consulte o arquivo [`LICENSE`](LICENSE) para os termos completos.
 
-> **[ Odin sees all ]**
+Você pode usar, modificar e distribuir o projeto, desde que mantenha o aviso de copyright original e cumpra os termos da licença MIT.
+
+---
+
+# 👤 Autor
+
+**Pendragon711**
+
+Desenvolvedor e entusiasta de segurança ofensiva.
+
+> *"Thought and Memory fly across the world."*
+> — Huginn e Muninn, os corvos de Odin.
+
+---
+
+<p align="center">
+  <strong>Odin — Advanced Web Reconnaissance Pipeline</strong>
+  <br>
+  <em>Reconnaissance · Attack Surface · Intelligence</em>
+  <br><br>
+  <strong>ᛟ Odin sees all ᛟ</strong>
+</p>
