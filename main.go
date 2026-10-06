@@ -21,6 +21,11 @@ configPath := flag.String("config", "config.yaml", "Caminho para o arquivo de co
 profile := flag.String("profile", "", "Sobrescreve o perfil definido no config.yaml (quick|standard|deep)")
 flag.Parse()
 
+	// Mostra o banner apenas se um domínio alvo for informado
+	if *targetDomain != "" && !*listResults {
+		core.PrintBanner()
+	}
+
 cfg, found, err := core.LoadConfig(*configPath)
 if err != nil {
 log.Fatalf("Erro ao carregar configuração: %v", err)
