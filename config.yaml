@@ -27,6 +27,11 @@ discovery:
   bruteforce: true
   wordlist: "" # vazio = usa a lista embutida pequena
   permutations: true
+  # Teto de sementes para permutação. Cada semente gera ~12 candidatos.
+  # 0    = usa default (200)
+  # N>0  = corta em N sementes
+  # -1   = sem teto (cuidado: cloudflare.com => ~24k, example.com => ~460k)
+  max_permutation_seeds: 200
 
 ports:
   profiles:

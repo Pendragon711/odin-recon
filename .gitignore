@@ -1,1 +1,20 @@
-(empty)
+# Binários compilados
+odin.exe
+odin
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Bancos de dados e saídas locais
+db/
+*.db
+*.sqlite
+*.txt
+*.json
+
+# Arquivos de configuração local (se tiver chaves de API no futuro)
+# config.yaml
+
+# Dependências do Go (opcional, mas o go.sum deve ser commitado)
+vendor/
