@@ -36,33 +36,66 @@
 
 As ferramentas externas devem estar disponíveis no `PATH` do sistema.
 
-### Windows / PowerShell
+🛠️ Guia de Instalação (Kali Linux):
 
-Clone o repositório:
+1. Pré-requisitos
+Antes de começar, certifique-se de que seu sistema está atualizado e possui as ferramentas base instaladas:
 
 ```powershell
-git clone https://github.com/Pendragon711/odin.git
-cd odin
+sudo apt
 ```
 
-Compile o projeto:
-
+2. Instalando as Dependências do Pipeline
+O Odin foi projetado para manter o fluxo de reconhecimento simples:
+O ODIN orquestra ferramentas externas. Para que o pipeline funcione corretamente, instale as seguintes ferramentas via go install ou gerenciador de pacotes:
 ```powershell
+# Instalar Subfinder (Enumeração de Subdomínios)
+go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+
+# Instalar Naabu (Varredura de Portas)
+go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
+
+# Instalar HTTPX (Sondagem HTTP)
+go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+
+# Instalar Katana (Crawler Web)
+go install -v github.com/projectdiscovery/katana/cmd/katana@latest
+```
+Nota: Certifique-se de que o diretório $GOPATH/bin esteja adicionado ao seu PATH no arquivo ~/.bashrc:
+export PATH=$PATH:$(go env GOPATH)/bin
+
+3. Clonando e Compilando o ODIN:
+   
+```powershell
+# Clonar o repositório
+git clone https://github.com/Pendragon711/odin-recon.git
+cd odin-recon
+
+# Compilar o binário
 go build -o odin .
-```
 
-O executável será criado na raiz:
-
-```text
-odin.exe
+# (Opcional) Instalar globalmente para usar de qualquer pasta
+sudo cp odin /usr/local/bin/odin
 ```
+4. Configurando o Arquivo de Perfis:
+Copie o arquivo de exemplo para criar sua configuração inicial:
+
+```powershell
+cp config.yaml.example config.yaml
+```
+Edite o config.yaml para ajustar wordlists ou chaves de API se necessário. Por padrão, o ODIN já vem com perfis otimizados (quick, standard, deep).
+
+5. Teste de Funcionamento
+Execute um scan de teste para validar a instalação:
+```powershell
+
+odin -d scanme.nmap.org -profile quick
+```
+Se o banner aparecer e o pipeline iniciar, sua instalação foi concluída com sucesso! 🚀
 
 ---
 
 # 📖 Uso
-
-O Odin foi projetado para manter o fluxo de reconhecimento simples:
-
 ```text
 Scan → Consulta → Exportação
 ```
