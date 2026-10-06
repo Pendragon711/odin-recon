@@ -21,6 +21,20 @@ configPath := flag.String("config", "config.yaml", "Caminho para o arquivo de co
 profile := flag.String("profile", "", "Sobrescreve o perfil definido no config.yaml (quick|standard|deep)")
 flag.Parse()
 
+	// Se nenhum argumento relevante for passado, mostra o help
+	if *targetDomain == "" && !*listResults && *exportFile == "" {
+		core.PrintBanner()
+		printCustomHelp()
+		return
+	}
+
+	// Se nenhum argumento relevante for passado, mostra o help
+	if *targetDomain == "" && !*listResults && *exportFile == "" {
+		core.PrintBanner()
+		printCustomHelp()
+		return
+	}
+
 	// Mostra o banner apenas se um domínio alvo for informado
 	if *targetDomain != "" && !*listResults {
 		core.PrintBanner()
@@ -42,7 +56,6 @@ cleanDomain := strings.ToLower(strings.TrimSpace(*targetDomain))
 cleanDomain = strings.ReplaceAll(cleanDomain, "/", "_")
 
 if cleanDomain == "" && !*listResults && *exportFile == "" {
-utils.LogError("É necessário informar um domínio alvo. Uso: odin -d exemplo.com")
 os.Exit(1)
 }
 
@@ -182,4 +195,18 @@ for i := range b {
 b[i] = '-'
 }
 return string(b)
+}
+
+func printCustomHelp() {
+	fmt.Println("Usage of odin:")
+	fmt.Println("  -d string")
+	fmt.Println("        Domínio alvo para o recon (ex: exemplo.com)")
+	fmt.Println("  -export string")
+	fmt.Println("        Exporta URLs válidas (sem WAF) para um arquivo de texto")
+	fmt.Println("  -list")
+	fmt.Println("        Lista os serviços HTTP salvos no banco de dados do alvo especificado")
+	fmt.Println("  -profile string")
+	fmt.Println("        Sobrescreve o perfil definido no config.yaml (quick|standard|deep)")
+	fmt.Println("  -status int")
+	fmt.Println("        Filtra -list por status code (0 = todos)")
 }
